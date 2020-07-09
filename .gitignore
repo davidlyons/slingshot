@@ -1,0 +1,6 @@
+*.obj
+convert_obj_three.py
+three.js
+leap/
+wip/
+math-hires.png

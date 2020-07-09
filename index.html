@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<meta name="description" content="">
+		<meta name="author" content="">
+
+		<title>Three.js Leap Motion Slingshot</title>
+
+		<link href="https://davidlyons.dev/sketches/info.css" rel="stylesheet">
+		<link href="style.css" rel="stylesheet">
+
+		<script src="//ajax.googleapis.com/ajax/libs/jquery/2.1.3/jquery.min.js"></script>
+
+		<!-- Google Analytics: change UA-XXXXX-X to be your site's ID. -->
+		<script>
+			if (document.location.hostname != 'localhost') {
+				(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+				(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+				m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+				})(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+				ga('create', 'UA-34432087-1', 'auto');
+				ga('send', 'pageview');
+			}
+		</script>
+
+	</head>
+
+	<body>
+
+		<div id="container"></div>
+
+		<div id="info-top">
+			<div id="output"></div>
+			<div id="output-leap"></div>
+		</div>
+
+		<div id="progress-wrapper">
+			<div id="progress"></div>
+		</div>
+		<div id="progress-label">v0</div>
+
+		<script src="third-party/three.min.js"></script>
+		<script src="third-party/OrbitControls.js"></script>
+		<script src="third-party/Detector.js"></script>
+		<script src="third-party/libs/stats.min.js"></script>
+		<script src="third-party/libs/dat.gui.min.js"></script>
+		<script src="third-party/libs/tween.min.js"></script>
+
+		<script src="//js.leapmotion.com/leap-0.6.4.js"></script>
+		<script src="//js.leapmotion.com/leap-plugins-0.1.11.js"></script>
+		<script src="//js.leapmotion.com/leap.rigged-hand-0.1.7.js"></script>
+		<script src="third-party/leap.pinchEvent.js"></script>
+
+		<script src="https://davidlyons.dev/sketches/info.js"></script>
+
+		<script>
+
+			// http://threejs.org/examples/webgl_interactive_draggablecubes.html
+			// http://threejs.org/docs/#Reference/Core/Raycaster.intersectObject
+
+			// TODO: make projectile mesh a child of the world, separate from slingshot group? ( SceneUtils attach / detach ? )
+
+			// TODO: create a Slingshot {} object with properties and methods, instead of global variables
+			//       for multiple slingshot instances
+
+			// TODO: Leap Network? https://github.com/leapmotion/leapjs-network
+
+			// TODO: Fix tunneling https://www.aorensoftware.com/blog/2011/06/01/when-bullets-move-too-fast
+
+
+			if ( ! Detector.webgl ) Detector.addGetWebGLMessage();
+
+			var info = new Info(
+				'Slingshot Projectile',
+				[
+					'<p><a href="https://davidlyons.dev">David Lyons</a>, December 2014</p>',
+					'<p>Includes <a href="https://www.leapmotion.com/" target="_blank">Leap Motion</a> controller support<br>',
+					'Pinch, aim, pull back, release</p>',
+					'<a href="http://instagram.com/p/wpYmqTQxqD" target="_blank">Instagram Video</a><br>',
+					'<a href="projectile-math.png" target="_blank">The Math</a>'
+				].join('')
+			);
+
+			var container, output, outputLeap, stats;
+
+			var camera, controls, scene, renderer;
+
+			// collision detection for project object raycaster + target intersected
+			var tRaycaster, tINTERSECTED;
+
+			var grid, slingshot, mesh, torus, line, v0ArrowHelper, rayArrowHelper, targetGroup, targetCenter;;
+
+			// leap motion controller
+			var pinched = false, pinchedOnce = false;
+
+			// var mouseOnMouseDown = new THREE.Vector2();
+
+			// interaction for mouse raycaster + projectile object intersected
+			var plane;
+			var raycaster = new THREE.Raycaster();
+			var mouse = new THREE.Vector2(),
+			offset = new THREE.Vector3(),
+			INTERSECTED, SELECTED;
+
+			var windowHalfX = window.innerWidth / 2;
+			var windowHalfY = window.innerHeight / 2;
+
+			var FLOOR = 0;
+
+			var clock = new THREE.Clock();
+
+			var v0 = 70;
+			var a = new THREE.Vector3( 0, -9.8, 0 );
+			var dt = 0.13;
+
+			var theta = Math.PI / 6; // vertical angle
+			var lambda = 0; // horizontal angle
+
+			var t, pos, vY, vXZ, vX, vZ, vel;
+			var origin = new THREE.Vector3( 0, 0, 0 ); // projectile starting point
+			pos = origin.clone();
+
+
+			function reinit() {
+				t = 0;
+				pos = mesh.position.clone();
+
+				vY = v0 * Math.sin(theta);
+				vXZ = Math.sqrt( Math.pow(v0,2) - Math.pow(vY,2) );
+				vX = vXZ * Math.cos(lambda);
+				vZ = vXZ * Math.sin(lambda);
+
+				vel = new THREE.Vector3( vX, vY, vZ );
+			}
+
+			var config = {
+				theta: theta,
+				lambda: lambda,
+				v0: v0,
+				run: function() {
+					reinit();
+
+					mesh.position.set( pos.x, pos.y, pos.z );
+
+					run = true;
+
+					setupTween(torus.position, 'x', origin.x);
+					setupTween(torus.position, 'y', origin.y);
+					setupTween(torus.position, 'z', origin.z);
+				},
+				showLine: true,
+				showGrid: false
+			};
+
+			var run = false;
+
+			init();
+			animate();
+
+			function init() {
+
+				container = document.getElementById( 'container' );
+				output = document.getElementById( 'output' );
+				outputLeap = document.getElementById( 'output-leap' );
+				progress = document.getElementById( 'progress' );
+
+				renderer = new THREE.WebGLRenderer( { antialias: true } );
+				renderer.setClearColor( 0xBBBBBB, 1 );
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+				scene = new THREE.Scene();
+				scene.fog = new THREE.FogExp2( 0xBBBBBB, 0.0007 );
+
+				camera = new THREE.PerspectiveCamera( 60, window.innerWidth / window.innerHeight, 1, 100000 );
+				camera.position.set(-700,200,30);
+				// scene.add( camera );
+
+				controls = new THREE.OrbitControls( camera, renderer.domElement );
+
+				camera.lookAt( scene.position );
+
+
+				var aLight = new THREE.AmbientLight( 0x404040 );
+				scene.add( aLight );
+
+				var dLight = new THREE.DirectionalLight( 0xffffff, 0.5 );
+				dLight.position.set( -1, 1, 1 );
+				scene.add( dLight );
+
+				var dLight2 = new THREE.DirectionalLight( 0xffffff, 0.5 );
+				dLight2.position.set( 1, 0, -1 );
+				scene.add( dLight2 );
+
+				var dLight3 = new THREE.DirectionalLight( 0xffffff, 0.3 );
+				dLight3.position.set( -1, -1, 0 );
+				scene.add( dLight3 );
+
+
+				// Ground
+				grid = new THREE.GridHelper( 200, 50 );
+				grid.setColors( 0x000000, 0x808080 );
+				grid.position.y = FLOOR;
+				grid.visible = false;
+				scene.add( grid );
+
+
+
+				// Slingshot Pieces ------------------------------------------------------------
+				// 5 scene graph objects: projectile, torus, plane, base, line
+
+				slingshot = new THREE.Group();
+				slingshot.position.set( -200, 0, 0 );
+				scene.add( slingshot );
+
+				// slingshot.position.set( 100, 0, -300 );
+				// slingshot.rotation.y = Math.PI / 2;
+				// camera.add( slingshot );
+
+				// Sphere Projectile
+				var material = new THREE.MeshPhongMaterial( { color: 0xcccccc, fog: false } );
+				var geometry = new THREE.SphereGeometry( 15, 12, 12 );
+				mesh = new THREE.Mesh( geometry, material );
+				// mesh.position.set( -200, 0, 0 );
+				slingshot.add( mesh );
+
+				// Torus
+				var torusMat = new THREE.MeshPhongMaterial( { color: 0x7D4802, fog: false } );
+				var torusGeo = new THREE.TorusGeometry( 15, 6, 12, 20 );
+				torus = new THREE.Mesh( torusGeo, torusMat );
+				torus.rotation.y = Math.PI / 2;
+				// torus.position.x = -200;
+				slingshot.add( torus );
+
+				// Invisible plane for dragging projectile
+				var planeGeo = new THREE.CircleGeometry( 300, 12, THREE.Math.degToRad(20), THREE.Math.degToRad(140) );
+				var planeMat = new THREE.MeshBasicMaterial( { color: 0x000000, opacity: 0.25, transparent: true } );
+				plane = new THREE.Mesh( planeGeo, planeMat );
+				// plane.position.x = -200;
+				plane.rotation.set( - Math.PI / 2, - Math.PI / 14, Math.PI / 2 );
+				plane.visible = false;
+				slingshot.add( plane );
+
+				// Y Base
+				var loader = new THREE.JSONLoader();
+
+				loader.load( "models/slingshotY.js", function ( geometry, materials ) {
+					var ssBase = new THREE.Mesh( geometry, torusMat );
+					// ssBase.position.set( -200, -51, 0 );
+					ssBase.position.y = -51;
+					ssBase.rotation.y = Math.PI / 2;
+					ssBase.scale.set( 0.57, 0.57, 0.57 );
+					slingshot.add( ssBase );
+				});
+
+				// reinit();
+
+				// Trajectory Line
+				createLine();
+
+				// ------------------------------------------
+
+				// Targets
+
+				targetGroup = new THREE.Group();
+				scene.add(targetGroup);
+
+				targetCenters = [];
+
+				var targetSize = 50;
+
+				for(var i = 0; i < 10; i++) {
+
+					targetSize = THREE.Math.randInt(40,70);
+
+					var ringGeo = new THREE.TorusGeometry( targetSize, 10, 6, 20 );
+					var ringMat = new THREE.MeshLambertMaterial( { color: 0xcccccc } );
+					var ring = new THREE.Mesh( ringGeo, ringMat );
+					ring.position.set( THREE.Math.randInt(100,800), THREE.Math.randInt(-100,100), THREE.Math.randFloatSpread(1000) );
+					ring.rotation.y = -Math.PI/2;
+					ring.lookAt( origin );
+					targetGroup.add( ring );
+
+					var circleGeo = new THREE.CircleGeometry( targetSize, 20 );
+					var circleMat = new THREE.MeshBasicMaterial( { color: 0x333333, side: THREE.DoubleSide, transparent: true, opacity: 0.2 } );
+					var circle = new THREE.Mesh( circleGeo, circleMat );
+					// circle.visible = false;
+					ring.add( circle );
+					targetCenters.push( circle );
+				}
+
+				// ------------------------------------------
+
+				setupGui();
+
+
+
+				// var axis = new THREE.AxisHelper(50);
+				// axis.position.y = 1;
+				// scene.add( axis );
+
+
+				tRaycaster = new THREE.Raycaster();
+
+
+				container.appendChild( renderer.domElement );
+
+
+				stats = new Stats();
+				stats.domElement.style.position = 'absolute';
+				stats.domElement.style.top = '0px';
+				container.appendChild( stats.domElement );
+
+
+				renderer.domElement.addEventListener( 'mousemove', onDocumentMouseMove, false );
+				renderer.domElement.addEventListener( 'mousedown', onDocumentMouseDown, false );
+				renderer.domElement.addEventListener( 'mouseup', onDocumentMouseUp, false );
+
+				renderer.domElement.addEventListener( 'touchstart', onDocumentTouchStart, false );
+				renderer.domElement.addEventListener( 'touchmove', onDocumentTouchMove, false );
+				renderer.domElement.addEventListener( 'touchend', onDocumentTouchEnd, false );
+
+				//
+
+				window.addEventListener( 'resize', onWindowResize, false );
+
+			}
+
+
+			// Tween.js
+			// http://sole.github.com/tween.js/examples/03_graphs.html
+			// http://learningthreejs.com/data/tweenjs_for_smooth_animation/tweenjs_for_smooth_animation.html
+			// http://learningthreejs.com/blog/2011/08/17/tweenjs-for-smooth-animation/
+
+			function setupTween(obj, prop, targetValue) {
+				var update  = function(){
+					obj[prop] = current.property;
+				}
+
+				var current = { property: obj[prop] };
+				var target = { property: targetValue };
+
+				var tween = new TWEEN.Tween(current).to(target, 1000)
+					.easing(TWEEN.Easing.Elastic.Out)
+					.onUpdate(update);
+
+				tween.start();
+			}
+
+			function setupGui() {
+				// dat.GUI debugging -----------------------------------------
+				var gui = new dat.GUI();
+				var f1 = gui.addFolder('projectile options');
+				f1.add(config, 'theta', 0, Math.PI/2).onChange(function(val){ theta = val; createLine(); });
+				f1.add(config, 'lambda', -Math.PI/2, Math.PI/2).onChange(function(val){ lambda = val; createLine(); });
+				f1.add(config, 'v0', 10, 200).onChange(function(val){ v0 = val; createLine(); });
+				f1.add(config, 'showLine').onChange(function(val){ line.visible = val; }).name('trajectory');
+				f1.add(config, 'showGrid').onChange(function(val){ grid.visible = val; }).name('grid');
+				f1.add(config, 'run');
+				f1.open();
+
+				var f2 = gui.addFolder('slingshot transform');
+				f2.add(slingshot.position, 'y', 0, 100);
+				f2.add(slingshot.position, 'z', -200, 200);
+				f2.add(slingshot.rotation, 'y', - Math.PI, Math.PI).name('rotation');
+				f2.open();
+			}
+
+
+			function onWindowResize() {
+
+				windowHalfX = window.innerWidth / 2;
+				windowHalfY = window.innerHeight / 2;
+
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+			}
+
+			function drag() {
+
+				var release = new THREE.Vector3().subVectors( mesh.position, origin );
+				release.negate();
+
+				// initial velocity strength
+				var length = (Math.round( release.length() * 100) / 100).toFixed(2);
+				outputLeap.innerHTML = 'release length: ' + length + '<br>';
+				progress.style.height = Math.min( 100, length / 300 * 100 ) + '%';
+
+				v0 = release.length();
+				theta = Math.asin( release.y / v0 );
+				lambda = Math.atan( release.z / release.x );
+
+				createLine();
+
+			}
+
+
+			function onDocumentMouseMove( event ) {
+
+				event.preventDefault();
+
+				mouse.x = ( event.clientX / window.innerWidth ) * 2 - 1;
+				mouse.y = - ( event.clientY / window.innerHeight ) * 2 + 1;
+
+				//
+
+				raycaster.setFromCamera( mouse, camera );
+
+				if ( SELECTED ) {
+
+					var intersects = raycaster.intersectObject( plane );
+					SELECTED.position.copy( SELECTED.parent.worldToLocal( intersects[ 0 ].point ).sub( offset ) );
+					torus.position.copy( SELECTED.position );
+
+					drag();
+
+					return;
+
+				}
+
+				var intersects = raycaster.intersectObject( mesh );
+
+				if ( intersects.length > 0 ) {
+
+					if ( INTERSECTED != intersects[ 0 ].object ) {
+
+						if ( INTERSECTED ) INTERSECTED.material.color.setHex( INTERSECTED.currentHex );
+
+						INTERSECTED = intersects[ 0 ].object;
+						INTERSECTED.currentHex = INTERSECTED.material.color.getHex();
+						INTERSECTED.material.color.setHex( 0x999999 );
+
+						// plane.position.copy( INTERSECTED.position );
+						// plane.lookAt( camera.position );
+
+					}
+
+					container.style.cursor = 'pointer';
+
+				} else {
+
+					if ( INTERSECTED ) INTERSECTED.material.color.setHex( INTERSECTED.currentHex );
+
+					INTERSECTED = null;
+
+					container.style.cursor = 'auto';
+
+				}
+
+			}
+
+			function onDocumentMouseDown( event ) {
+
+				event.preventDefault();
+
+				var vector = new THREE.Vector3( mouse.x, mouse.y, 0.5 ).unproject( camera );
+
+				var raycaster = new THREE.Raycaster( camera.position, vector.sub( camera.position ).normalize() );
+
+				var intersects = raycaster.intersectObject( mesh );
+
+				if ( intersects.length > 0 ) {
+
+					controls.enabled = false;
+
+					SELECTED = intersects[ 0 ].object;
+
+					var intersects = raycaster.intersectObject( plane );
+					offset.copy( SELECTED.parent.worldToLocal( intersects[ 0 ].point ) ).sub( plane.position );
+
+					container.style.cursor = 'move';
+
+				}
+
+			}
+
+			function onDocumentMouseUp( event ) {
+
+				event.preventDefault();
+
+				controls.enabled = true;
+
+				if ( SELECTED ) {
+
+					SELECTED = null;
+					config.run();
+
+				}
+
+				container.style.cursor = 'auto';
+
+			}
+
+
+			function onDocumentTouchStart( event ) {
+
+				if ( event.touches.length === 1 ) {
+
+					event.preventDefault();
+
+					mouse.x = ( event.touches[ 0 ].pageX / window.innerWidth ) * 2 - 1;
+					mouse.y = - ( event.touches[ 0 ].pageY / window.innerHeight ) * 2 + 1;
+
+					var vector = new THREE.Vector3( mouse.x, mouse.y, 0.5 ).unproject( camera );
+
+					var raycaster = new THREE.Raycaster( camera.position, vector.sub( camera.position ).normalize() );
+
+					var intersects = raycaster.intersectObject( mesh );
+
+					if ( intersects.length > 0 ) {
+
+						controls.enabled = false;
+
+						SELECTED = intersects[ 0 ].object;
+
+						var intersects = raycaster.intersectObject( plane );
+						offset.copy( SELECTED.parent.worldToLocal( intersects[ 0 ].point ) ).sub( plane.position );
+
+						container.style.cursor = 'move';
+
+					}
+
+				}
+
+			}
+
+			function onDocumentTouchMove( event ) {
+
+				if ( event.touches.length === 1 ) {
+
+					event.preventDefault();
+
+					mouse.x = ( event.touches[ 0 ].pageX / window.innerWidth ) * 2 - 1;
+					mouse.y = - ( event.touches[ 0 ].pageY / window.innerHeight ) * 2 + 1;
+
+					raycaster.setFromCamera( mouse, camera );
+
+					if ( SELECTED ) {
+
+						var intersects = raycaster.intersectObject( plane );
+						SELECTED.position.copy( SELECTED.parent.worldToLocal( intersects[ 0 ].point ).sub( offset ) );
+						torus.position.copy( SELECTED.position );
+
+						drag();
+
+						return;
+
+					}
+
+				}
+
+			}
+
+			function onDocumentTouchEnd( event ) {
+
+					event.preventDefault();
+
+					controls.enabled = true;
+
+					if ( SELECTED ) {
+
+						SELECTED = null;
+						config.run();
+
+					}
+
+			}
+
+
+			function createLine() {
+				var lineMat = new THREE.LineDashedMaterial( { color: 0xff0000 } );
+				var lineGeo = new THREE.Geometry();
+
+				reinit();
+
+				// -----
+
+				// v0 Arrow Helper
+
+				// var dir = vel.clone().normalize();
+				// var origin = pos;
+				// var length = v0;
+				// var hex = 0xffff00;
+
+				// if ( v0ArrowHelper ) slingshot.remove( v0ArrowHelper );
+				// v0ArrowHelper = new THREE.ArrowHelper( dir, origin, length, 0x0000ff );
+				// slingshot.add( v0ArrowHelper );
+
+				// -----
+
+				while ( t < 20 ) {
+					pos.x = pos.x + vel.x * dt;
+					pos.z = pos.z + vel.z * dt;
+					pos.y = pos.y + vel.y * dt + 0.5 * a.y * Math.pow(dt,2);
+
+					vel.y = vel.y + a.y * dt;
+
+					t = t + dt;
+
+					lineGeo.vertices.push( new THREE.Vector3( pos.x, pos.y, pos.z ) );
+				}
+
+				if (line) slingshot.remove(line);
+				line = new THREE.Line( lineGeo, lineMat );
+				line.visible = config.showLine;
+				slingshot.add( line );
+			}
+
+			//
+
+			function animate() {
+				requestAnimationFrame( animate );
+				render();
+				stats.update();
+				TWEEN.update();
+				controls.update();
+			}
+
+			function render() {
+
+				// var time = clock.getElapsedTime();
+				// var delta = clock.getDelta();
+
+				// output.innerHTML = (Math.round( time * 100) / 100).toFixed(2);
+
+
+				// http://hyperphysics.phy-astr.gsu.edu/hbase/traj.html
+				// http://www.physgl.org/
+
+				if ( run == true ) {
+
+					if( t < 20 ) {
+						pos.x = pos.x + vel.x * dt;
+						pos.z = pos.z + vel.z * dt;
+						pos.y = pos.y + vel.y * dt + 0.5 * a.y * Math.pow(dt,2);
+
+						vel.y = vel.y + a.y * dt;
+
+						t = t + dt;
+
+						mesh.position.set( pos.x, pos.y, pos.z );
+
+						// Raycaster representation in world because targets are in world coordinates
+						var dir = vel.clone().applyQuaternion( slingshot.getWorldQuaternion() ).normalize();
+						var arrowOrigin = slingshot.localToWorld( pos.clone() );
+						// var length = 200;
+
+						// if ( rayArrowHelper ) scene.remove( rayArrowHelper );
+						// rayArrowHelper = new THREE.ArrowHelper( dir, arrowOrigin, length );
+						// scene.add( rayArrowHelper );
+
+						// Target collision detection
+						tRaycaster.set( arrowOrigin, dir );
+						tRaycaster.far = 15;
+						var intersects = tRaycaster.intersectObjects( targetCenters );
+
+						// ----
+
+									// change intersected color
+
+									if ( intersects.length > 0 ) {
+
+										if ( tINTERSECTED != intersects[ 0 ].object.parent ) {
+
+											if ( tINTERSECTED ) tINTERSECTED.material.color.setHex( tINTERSECTED.currentHex );
+
+											// console.log( intersects[ 0 ].distance );
+											tINTERSECTED = intersects[ 0 ].object.parent;
+											tINTERSECTED.currentHex = tINTERSECTED.material.color.getHex();
+											tINTERSECTED.material.color.setHex( 0x005d98 );
+											tINTERSECTED.material.emissive.setHex( 0x004b7b );
+
+										}
+
+									}
+
+									// else {
+									//   if ( INTERSECTED ) INTERSECTED.material.color.setHex( INTERSECTED.currentHex );
+									//   INTERSECTED = null;
+									// }
+
+					}
+
+					else {
+						run = false;
+
+						reinit();
+						pos = origin.clone();
+
+						mesh.position.set( pos.x, pos.y, pos.z );
+					}
+
+				}
+
+				renderer.render( scene, camera );
+			}
+
+			// -------------------------------------------------------
+
+			// Leap Motion Controller
+
+			Leap.loop(function(frame) {
+
+				var hand, handMesh;
+
+				if (hand = frame.hands[0]) {
+
+					// outputLeap.innerHTML = 'pinchStrength: ' + hand.pinchStrength.toPrecision(2) + '<br>';
+					// progress.style.width = hand.pinchStrength * 100 + '%';
+
+					if (pinched) {
+
+						handMesh = frame.hands[0].data('riggedHand.mesh');
+
+						var tipPosition = hand.indexFinger.tipPosition;
+						tipPosition = new THREE.Vector3().fromArray( tipPosition );
+						slingshot.worldToLocal( tipPosition );
+						tipPosition = tipPosition.toArray();
+
+						handMesh.scenePosition( tipPosition, mesh.position );
+						handMesh.scenePosition( tipPosition, torus.position );
+						// torus.lookAt( origin );
+
+						drag();
+					}
+				}
+
+			}).use('transform', {
+				position: new THREE.Vector3(-300,-200,0),
+				quaternion: new THREE.Quaternion().setFromAxisAngle( new THREE.Vector3( 0, 1, 0 ), - Math.PI / 2 )
+			}).use('riggedHand', {
+				dotsMode: false,
+				parent: scene,
+				renderFn: function(){
+					renderer.render(scene, camera);
+				},
+				boneColors: function(boneMesh, leapHand) {
+					if ((boneMesh.name.indexOf('Finger_0') === 0) || (boneMesh.name.indexOf('Finger_1') === 0)) {
+						return {
+							hue: 0.6,
+							saturation: leapHand.pinchStrength
+						};
+					}
+				}
+			}).use('handEntry')
+				.use('pinchEvent');
+
+
+			// pinch events
+			Leap.loopController.on('pinch', function(hand){
+
+				pinched = true;
+				pinchedOnce = true;
+				run = false;
+
+				TWEEN.removeAll();
+
+			}).on('unpinch', function(hand){
+
+				pinched = false;
+
+				if(pinchedOnce) {
+					config.run();
+				}
+
+			}).on('handLost', function(hand){
+
+				// leapmotion.github.io/leapjs-plugins/docs/#hand-entry
+				pinched = false;
+				pinchedOnce = false;
+
+			});
+
+		</script>
+
+
+	</body>
+</html>
