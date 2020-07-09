@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
 	<head>
+		<!-- Global site tag (gtag.js) - Google Analytics -->
+		<script async src="https://www.googletagmanager.com/gtag/js?id=UA-113315813-1"></script>
+		<script src="https://davidlyons.dev/sketches/ga.js"></script>
+
 		<meta charset="utf-8">
 		<meta http-equiv="X-UA-Compatible" content="IE=edge" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,21 +15,6 @@
 
 		<link href="https://davidlyons.dev/sketches/info.css" rel="stylesheet">
 		<link href="style.css" rel="stylesheet">
-
-		<script src="//ajax.googleapis.com/ajax/libs/jquery/2.1.3/jquery.min.js"></script>
-
-		<!-- Google Analytics: change UA-XXXXX-X to be your site's ID. -->
-		<script>
-			if (document.location.hostname != 'localhost') {
-				(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
-				(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
-				m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
-				})(window,document,'script','//www.google-analytics.com/analytics.js','ga');
-
-				ga('create', 'UA-34432087-1', 'auto');
-				ga('send', 'pageview');
-			}
-		</script>
 
 	</head>
 
@@ -42,6 +31,8 @@
 			<div id="progress"></div>
 		</div>
 		<div id="progress-label">v0</div>
+
+		<script src="//ajax.googleapis.com/ajax/libs/jquery/2.1.3/jquery.min.js"></script>
 
 		<script src="third-party/three.min.js"></script>
 		<script src="third-party/OrbitControls.js"></script>
@@ -361,13 +352,13 @@
 				f1.add(config, 'showLine').onChange(function(val){ line.visible = val; }).name('trajectory');
 				f1.add(config, 'showGrid').onChange(function(val){ grid.visible = val; }).name('grid');
 				f1.add(config, 'run');
-				f1.open();
+				// f1.open();
 
 				var f2 = gui.addFolder('slingshot transform');
 				f2.add(slingshot.position, 'y', 0, 100);
 				f2.add(slingshot.position, 'z', -200, 200);
 				f2.add(slingshot.rotation, 'y', - Math.PI, Math.PI).name('rotation');
-				f2.open();
+				// f2.open();
 			}
 
 
